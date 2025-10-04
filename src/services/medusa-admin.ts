@@ -4,7 +4,6 @@ import { z, ZodTypeAny } from "zod";
 import adminJson from "../oas/admin.json";
 import { SdkRequestType, Parameter } from "../types/admin-json";
 import { defineTool, InferToolHandlerInput } from "../utils/define-tools";
-import { StoreProductListResponse } from "@medusajs/types";
 
 config();
 
@@ -61,78 +60,123 @@ export default class MedusaAdminService {
             if (!name) {
                 throw new Error("No name found for path: " + refPath);
             }
+            const paramSchema = parameters
+                .filter((p) => p.in != "header")
+                .reduce((acc, param) => {
+                    switch (param.schema.type) {
+                        case "string":
+                            acc[param.name] = z.string().optional();
+                            break;
+                        case "number":
+                            acc[param.name] = z.number().optional();
+                            break;
+                        case "boolean":
+                            acc[param.name] = z.boolean().optional();
+                            break;
+                        case "array":
+                            acc[param.name] = z
+                                .array(z.string())
+                                .optional();
+                            break;
+                        case "object":
+                            acc[param.name] = z.object({}).optional();
+                            break;
+                        default:
+                            acc[param.name] = z.string().optional();
+                    }
+                    return acc;
+                }, {} as any);
+
+            // For POST/DELETE, add common body field validators
+            // Use z.unknown() for flexibility since different endpoints expect different types
+            const bodySchema = method !== "get" ? {
+                title: z.string().optional(),
+                description: z.string().optional(),
+                subtitle: z.string().optional(),
+                handle: z.string().optional(),
+                status: z.string().optional(),
+                sku: z.string().optional(),
+                options: z.unknown().optional(), // Can be array or object depending on endpoint
+                variants: z.unknown().optional(),
+                images: z.unknown().optional(),
+                prices: z.unknown().optional(),
+                metadata: z.unknown().optional(),
+                tags: z.unknown().optional(),
+                type: z.unknown().optional(),
+                collection_id: z.string().optional(),
+                categories: z.unknown().optional(),
+                manage_inventory: z.boolean().optional(),
+                allow_backorder: z.boolean().optional(),
+                // Catch-all for other body fields
+                ...Object.fromEntries(
+                    ['weight', 'length', 'height', 'width', 'hs_code', 'mid_code', 
+                     'material', 'origin_country', 'discountable', 'is_giftcard',
+                     'thumbnail', 'external_id'].map(k => [k, z.unknown().optional()])
+                )
+            } : {};
+
             return {
                 name: `Admin${name}`,
                 description: `This tool helps store administors. ${description}`,
                 inputSchema: {
-                    ...parameters
-                        .filter((p) => p.in != "header")
-                        .reduce((acc, param) => {
-                            switch (param.schema.type) {
-                                case "string":
-                                    acc[param.name] = z.string().optional();
-                                    break;
-                                case "number":
-                                    acc[param.name] = z.number().optional();
-                                    break;
-                                case "boolean":
-                                    acc[param.name] = z.boolean().optional();
-                                    break;
-                                case "array":
-                                    acc[param.name] = z
-                                        .array(z.string())
-                                        .optional();
-                                    break;
-                                case "object":
-                                    acc[param.name] = z.object({}).optional();
-                                    break;
-                                default:
-                                    acc[param.name] = z.string().optional();
-                            }
-                            return acc;
-                        }, {} as any)
+                    ...paramSchema,
+                    ...bodySchema
                 },
 
                 handler: async (
                     input: InferToolHandlerInput<any, ZodTypeAny>
                 ): Promise<any> => {
-                    const query = new URLSearchParams(input);
-                    const body = Object.entries(input).reduce(
-                        (acc, [key, value]) => {
-                            if (
-                                parameters.find(
-                                    (p) => p.name === key && p.in === "body"
-                                )
-                            ) {
-                                acc[key] = value;
-                            }
-                            return acc;
-                        },
-                        {} as Record<string, any>
-                    );
-                    if (method === "get") {
-                        const response = await this.sdk.client.fetch(refPath, {
-                            method: method,
-                            headers: {
-                                "Content-Type": "application/json",
-                                "Accept": "application/json",
-                                "Authorization": `Bearer ${this.adminToken}`
-                            },
-                            query
-                        });
-                        return response;
-                    } else {
-                        const response = await this.sdk.client.fetch(refPath, {
-                            method: method,
-                            headers: {
-                                "Content-Type": "application/json",
-                                "Accept": "application/json",
-                                "Authorization": `Bearer ${this.adminToken}`
-                            },
-                            body: JSON.stringify(body)
-                        });
-                        return response;
+                    const queryParamNames = (parameters || [])
+                        .filter((p) => p.in === "query")
+                        .map((p) => p.name);
+                    
+                    const pathParamNames = (parameters || [])
+                        .filter((p) => p.in === "path")
+                        .map((p) => p.name);
+
+                    // Replace path parameters in URL
+                    let finalPath = refPath;
+                    for (const paramName of pathParamNames) {
+                        const value = (input as any)[paramName];
+                        if (value !== undefined && value !== null) {
+                            finalPath = finalPath.replace(`{${paramName}}`, String(value));
+                        }
                     }
+
+                    const query = new URLSearchParams();
+                    for (const name of queryParamNames) {
+                        const value = (input as any)[name];
+                        if (value === undefined || value === null) continue;
+                        if (Array.isArray(value)) {
+                            for (const v of value) query.append(name, String(v));
+                        } else {
+                            query.set(name, String(value));
+                        }
+                    }
+
+                    // Build body from remaining inputs (exclude query/header/path params)
+                    const body: Record<string, any> = {};
+                    if (method !== "get") {
+                        for (const [key, value] of Object.entries(input as any)) {
+                            if (queryParamNames.includes(key)) continue;
+                            if (pathParamNames.includes(key)) continue;
+                            body[key] = value;
+                        }
+                    }
+
+                    const response = await this.sdk.client.fetch(finalPath, {
+                        method: method,
+                        headers: {
+                            "Content-Type": "application/json",
+                            "Accept": "application/json",
+                            "Authorization": `Bearer ${this.adminToken}`
+                        },
+                        // Always pass query if present; SDK will ignore if empty
+                        query,
+                        // Pass an object; SDK handles JSON encoding. Avoid double-stringify
+                        ...(method === "get" ? {} : { body })
+                    });
+                    return response;
                 }
             };
         });
@@ -140,9 +184,22 @@ export default class MedusaAdminService {
 
     defineTools(admin = adminJson): any[] {
         const paths = Object.entries(admin.paths) as [string, SdkRequestType][];
-        const tools = paths.map(([path, refFunction]) =>
-            this.wrapPath(path, refFunction)
-        );
+        const tools: any[] = [];
+        
+        for (const [path, refFunction] of paths) {
+            const anyRef = refFunction as any;
+            // Process each HTTP method separately, checking for operationId
+            if (anyRef.get && anyRef.get.operationId) {
+                tools.push(this.wrapPath(path, { get: anyRef.get } as any));
+            }
+            if (anyRef.post && anyRef.post.operationId) {
+                tools.push(this.wrapPath(path, { post: anyRef.post } as any));
+            }
+            if (anyRef.delete && anyRef.delete.operationId) {
+                tools.push(this.wrapPath(path, { delete: anyRef.delete } as any));
+            }
+        }
+        
         return tools;
     }
 }

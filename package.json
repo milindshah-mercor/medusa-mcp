@@ -2,14 +2,14 @@
   "name": "@sgftech/medusa-mcp",
   "version": "1.0.0",
   "main": "index.js",
-  "private":"false",
+  "private": "false",
   "scripts": {
     "test": "echo \"Error: no test specified\" && exit 1",
     "build": "tsc",
     "start": "node dist/index.js",
     "dev": "ts-node src/index.ts",
     "inspector": "mcp-inspector m",
-    "dev:inspector":  "npx @modelcontextprotocol/inspector node dist/index.js" 
+    "dev:inspector": "npx @modelcontextprotocol/inspector node dist/index.js"
   },
   "keywords": [],
   "author": {
@@ -18,12 +18,13 @@
   },
   "repository": {
     "type": "git",
-    "url":"https://github.com/SGFGOV/medusa-mcp.git"
+    "url": "https://github.com/SGFGOV/medusa-mcp.git"
   },
   "license": "ISC",
   "description": "",
   "dependencies": {
     "@medusajs/js-sdk": "2.6.0",
+    "@medusajs/medusa-oas-cli": "^2.10.3",
     "@modelcontextprotocol/sdk": "^1.8.0",
     "dotenv": "^16.4.7",
     "zod": "^3.24.2"
@@ -48,7 +49,7 @@
     "ioredis": "^5.6.0",
     "mcp-inspector": "^1.0.0",
     "prettier": "^2.7.1",
-    "typescript": "^4.7.4",
+    "typescript": "^5.9.3",
     "vite": "^6.2.5"
   }
 }
